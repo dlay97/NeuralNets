@@ -7,7 +7,8 @@ Created on Wed Sep 12 14:48:48 2018
 
 With blocks this time!
 
-FINITE DIFFERENCE TESTING STILL FAILS TO FOLLOW GRADIENT
+FINITE DIFFERENCE TESTING STILL FAILS TO FOLLOW GRADIENT - 
+As of 10/19: NN action is translation invariant; gradient is not.
 """
 
 import numpy as np
@@ -26,8 +27,8 @@ np.random.seed(5)
 """
 Reads in data used.
 """
-def read_file(input_file):
-    with open(input_file+' Plaquettes.txt') as file:
+def read_plaqs(input_file):
+    with open(input_file) as file:
         plaqs = file.readlines()
 
     temp_configs = np.asarray(plaqs)
@@ -40,8 +41,10 @@ def read_file(input_file):
         configs.append(temp_config)
     configs = np.asarray(configs)
     plaqs = configs[:,0:-1]
+    return plaqs
 
-    with open(input_file+" Actions.txt") as file:
+def read_acts(input_file):
+    with open(input_file) as file:
         actions = file.readlines()
     temp_actions = np.asarray(actions)
     actions = []
@@ -50,28 +53,7 @@ def read_file(input_file):
         action = np.asarray([float(action[0])])
         actions.append(action)
     actions = np.reshape(np.asarray(actions),(-1,))
-    return plaqs, actions
-
-"""
-Stuff for neural net construction. May need to wrap a command that generates
-all layers later.
-"""
-# weight_dims should be an array with the output sizes 
-def full_layer_params(out_size,in_size,param_type='Rand',loc=0,scale=1):
-    if param_type == 'Zeros':
-        weights = np.zeros((out_size,in_size))
-        biases = np.zeros((out_size))
-    elif param_type == 'Rand':
-        weights = np.random.normal(loc,scale,size=(out_size,in_size))
-        biases = np.random.normal(loc,scale,size=(out_size))
-    elif param_type == 'Ones':
-        weights = scale*np.ones((out_size,in_size))
-        biases = scale*np.ones((out_size))
-    else:
-        print('Pick a layer type.')
-        return
-    
-    return biases, weights
+    return actions
     
 """
 Computes stuff to show how the training works, e.g. the cost function.
@@ -149,7 +131,7 @@ def feed_through_all(configs,weights,biases,latt_dim,n_plaqs,n_loops,n_blocks,ve
     #shape not inferred from weights because weights must be unpacked
     z1 = np.zeros((configs.shape[0],configs.shape[1],n_blocks)) #len of config, n_blocks, n_configs
     a1 = z1.copy()
-    for t in range(0,len(configs)):
+    for t in range(0,configs.shape[0]):
         config_in = configs[t,:].reshape((-1,1))
         z1[t,:,:], a1[t,:,:] = feed_through_layer(config_in,weights[0],biases[0],\
                       latt_dim,n_plaqs,n_loops,n_blocks)
@@ -159,9 +141,9 @@ def feed_through_all(configs,weights,biases,latt_dim,n_plaqs,n_loops,n_blocks,ve
     z2 = np.zeros(configs.shape[0])
     
     for t in range(0,len(configs)):
-        
-        config_in = a1[t,:,:].reshape((-1,1))
-        z2[t] = np.dot(weights[1],config_in) + biases[1]
+        for b in range(0,n_blocks):
+            config_in = a1[t,:,b]
+            z2[t] += np.dot(weights[1][:,b],config_in) + biases[1]
     a2 = activate(z2)#because actions are nonnegative, activation is fine here
     z_out.append(z2)
     a_out.append(a2)
@@ -417,7 +399,10 @@ def train(weights,biases,n_epochs,n_keep,val_configs,val_actions,train_configs,t
         return std_vals, w_all, bias_all, deltas
     else:
         return std_vals, weights_in, biases_in
-plaqs, actions = read_file('4x4')
+
+plaqs = read_plaqs('4x4 Plaqs.txt')[0,:].reshape((1,-1))
+shift_plaqs = read_plaqs('4x4 Translated n_t Plaqs.txt')[0,:].reshape((1,-1))
+actions = read_acts('4x4 Actions.txt')
 #test_plaqs = plaqs[0:10,:]#.reshape((22,-1))
 
 latt_dim = [4,4]
@@ -429,41 +414,32 @@ n_params = np.sum(n_loops)+n_plaqs
 
 #Excluding input layer - check because code isn't arbitrary yet
 n_layers = 2
-learn_rate = 1e-6#Much higher of a learning rate makes training completely random
+learn_rate = 1e-2#Much higher of a learning rate makes training completely random
 
 #Imported from block_param_funcs - defines parameters for a block
 a, b1, W1 = param_init(latt_dim,n_plaqs,n_blocks,n_loops)#,var_type='Ones',mult=0.1)
-b2, W2 = full_layer_params(1,b1.shape[0]*n_blocks)#,param_type='Ones',scale=0.1)
+b2, W2 = fnn_param_init(latt_dim,n_blocks)
 
 #Probably inefficient way, but chain_rule makes sure that W1 isn't populated
 # mostly by zeros.
 W1 = chain_rule(mask_mat(latt_dim,n_plaqs,n_blocks,n_loops,W1),latt_dim,n_plaqs,n_blocks,n_loops)
-#M = mask_mat(latt_dim,n_plaqs,n_blocks,n_loops)
 
 w = [W1,W2]
 b = [b1,b2]
 
-#dw,db,w,b = epoch(test_plaqs,actions[0:10],weights,biases,latt_dim,n_plaqs,
-#                 n_loops,n_blocks,debug=True)
 
-#print('dW0 = \n'+str(dW0[:,:,0]))
 n_epochs = 5000
 n_keep = 200
 
-train_configs = plaqs[0:500,:]
-train_actions = actions[0:500]
-val_configs = plaqs[500:600,:]
-val_actions = actions[500:600]
+z, a = feed_through_all(plaqs,w,b,latt_dim,n_plaqs,n_loops,n_blocks)
+z_s, a_s = feed_through_all(shift_plaqs,w,b,latt_dim,n_plaqs,n_loops,n_blocks)
 
-#z_all, a_all = feed_through_all(val_configs,weights,biases,latt_dim,n_plaqs,n_loops,n_blocks)
-#std_test = cost(val_actions,a_all[1])
-#print(std_test)
 
 #test=compute_grad(train_configs,train_actions,w,b,latt_dim,n_plaqs,
 #                  n_loops,n_blocks,debug=True)
-std_out, weight_out, bias_out = train(w,b,n_epochs,n_keep,val_configs,
-                                      val_actions,train_configs,train_actions,
-                                      write=True,debug=False,mode='FD')
+#std_out, weight_out, bias_out = train(w,b,n_epochs,n_keep,val_configs,
+#                                      val_actions,train_configs,train_actions,
+#                                      write=True,debug=False)
 #fd_test = fd_w1(train_configs,train_actions,w,b)
 #print('finite difference: \n'+str(w[1] - learn_rate * fd_test))
 #print('back propagation: \n'+str(weight_out[-1][1]))
