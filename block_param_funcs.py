@@ -316,3 +316,51 @@ def chain_rule(weight_mat,latt_dim,n_plaqs,n_blocks,n_loops):
     weight_mid = wrap_sum_weights(weight_in,latt_dim,n_plaqs,n_loops,n_blocks)
     weight_out = full_mat(weight_mid,latt_dim,n_plaqs,n_loops,n_blocks,unwrap=True)
     return weight_out
+
+#Applies the chain rule for the fully connected layer
+def chainRuleF(weights,latt_dim,n_plaqs,n_blocks,n_loops):
+    n_distinct = int(n_plaqs/latt_dim[0])#number of distinct plaquettes
+    weight_out = np.zeros(weights.shape)
+    for t in range(0,n_blocks):
+        weight_temp = np.zeros(np.sum(n_loops))
+        for s in range(0,latt_dim[0]):
+            weight_temp[0:n_distinct] += weights[s*n_distinct:(s+1)*n_distinct,t]
+        weight_temp[n_distinct] = np.sum(weights[n_plaqs:n_plaqs+latt_dim[0],t])
+        weight_temp[-1] = weights[-1,t]
+        
+        for s in range(0,latt_dim[0]):
+            weight_out[s*n_distinct:(s+1)*n_distinct,t] = weight_temp[0:n_distinct]
+        weight_out[n_plaqs:n_plaqs+latt_dim[0],t] = weight_temp[n_distinct]
+        weight_out[-1,t] = weight_temp[-1]
+    return weight_out
+        
+
+
+"""
+Fully connected layer stuff.
+
+Since the output is a number, the bias should just be a number.
+"""
+def fnn_param_init(latt_dim,n_blocks,param_type='Rand',loc=0,scale=1):
+    in_size = latt_dim[0] + 1#latt_dim[0]-1 for plaqs, +1 for t_loops, +1 for x_loop
+            #also - loops may be flipped
+    weight_out = np.zeros((np.prod(latt_dim)+1,n_blocks))
+    for t in range(0,n_blocks):
+        if param_type == 'Zeros':
+            weights = np.zeros((in_size))
+            biases = np.zeros(1)
+        elif param_type == 'Rand':
+            weights = np.random.normal(loc,scale,size=(in_size))
+            biases = np.random.normal(loc,scale,size=1)
+        elif param_type == 'Ones':
+            weights = scale*np.ones((in_size))
+            biases = scale*np.ones(1)
+        else:
+            print('Pick a layer type.')
+            return
+        for i in range(0,latt_dim[1]):
+            weight_out[i*(latt_dim[0]-1):(i+1)*(latt_dim[0]-1),t] = weights[0:latt_dim[0]-1]
+        weight_out[(latt_dim[0]-1)*latt_dim[1]:,t] = weights[latt_dim[0]-1]
+        weight_out[-1,t] = weights[-1]
+    return biases, weight_out
+    
