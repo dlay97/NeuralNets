@@ -22,7 +22,7 @@ t_start = time.time()
 
 os.chdir(os.getcwd()+'/Plaqs')
 
-np.random.seed(5)
+#np.random.seed(5)
 
 """
 Reads in data used.
@@ -58,16 +58,26 @@ def read_acts(input_file):
 """
 Computes stuff to show how the training works, e.g. the cost function.
 """
-def cost(real_actions,nn_actions):
-    n_actions = len(real_actions)
-    cost_out = 0
-    for t in range(0,n_actions):
-        cost_out += 1/n_actions*(nn_actions[t]-real_actions[t])**2
+def cost(real_actions,nn_actions,cost_type='std'):
+    if cost_type == 'Squares':
+        n_actions = len(real_actions)
+        cost_out = 0
+        for t in range(0,n_actions):
+            cost_out += 1/n_actions*(nn_actions[t]-real_actions[t])**2
+    elif cost_type == 'std':
+        n_actions = len(real_actions)
+        diff = real_actions - nn_actions
+        cost_out = np.mean(diff**2) - np.mean(diff)**2
     return cost_out
 
 #Returns the cost function evaluated at a single configuration
-def d_cost(real_actions,nn_actions):
-    cost_out = 2*(nn_actions - real_actions)
+def d_cost(real_actions,nn_actions,cost_type='std'):
+    n_actions = len(nn_actions)
+    if cost_type == 'Squares':
+        cost_out = 2*(nn_actions - real_actions)
+    elif cost_type == 'std':
+        cost_out = 2*(nn_actions - real_actions)/n_actions \
+                - 2*np.mean(nn_actions - real_actions)/n_actions
     return cost_out
 
 """
@@ -161,13 +171,12 @@ Finite difference gradient terms.
 """
 #Finite difference gradient.
 def fd_w0(configs,actions,weights,biases):
-    eps = 0.001
     dw_out = np.zeros(weights[0].shape)
     for i in range(0,n_params):
         for j in range(0,n_params):
             for k in range(0,n_blocks):
                 w0_temp = np.zeros(weights[0].shape)
-                w0_temp[i,j,k] = eps
+                w0_temp[i,j,k] = fd_eps
                 w0_temp = chain_rule(w0_temp,latt_dim,n_plaqs,n_blocks,n_loops)
                 w0_plus = weights[0].copy()
                 w0_minus = weights[0].copy()
@@ -181,18 +190,18 @@ def fd_w0(configs,actions,weights,biases):
                                                   n_plaqs,n_loops,n_blocks)
                 cost_p = cost(actions,a_p[1])
                 cost_m = cost(actions,a_m[1])
-                dw_out[i,j,k] = (cost_p - cost_m)/(2*eps)
+                dw_out[i,j,k] = (cost_p - cost_m)/(2*fd_eps)
     return dw_out
 
 def fd_b0(configs,actions,weights,biases):
-    eps = 0.001
     db_out = np.zeros(biases[0].shape)
     for i in range(0,n_params):
         for k in range(0,n_blocks):
-            b0_p = biases[0].copy()
-            b0_p[i,k] += eps
-            b0_m = biases[0].copy()
-            b0_m[i,k] -= eps
+            b0_temp = np.zeros(biases[0].shape)
+            b0_temp[i,k] = fd_eps
+            b0_temp = chainRuleF(b0_temp,latt_dim,n_plaqs,n_blocks,n_loops)
+            b0_p = biases[0] + b0_temp
+            b0_m = biases[0] - b0_temp
             b_plus = [b0_p,biases[1]]
             b_minus = [b0_m,biases[1]]
             z_p,a_p=feed_through_all(configs,weights,b_plus,latt_dim,n_plaqs,n_loops,
@@ -201,32 +210,32 @@ def fd_b0(configs,actions,weights,biases):
                                      n_blocks)
             cost_p = cost(actions,a_p[1])
             cost_m = cost(actions,a_m[1])
-            db_out[i,k] = (cost_p - cost_m)/(2*eps)
+            db_out[i,k] = (cost_p - cost_m)/(2*fd_eps)
     return db_out
 
 def fd_w1(configs,actions,weights,biases):
-    eps = 0.00001
     dw_out = np.zeros(weights[1].shape)
-    for i in range(0,np.prod(weights[1].shape)):
-        w_p = weights[1].copy()
-        w_m = w_p.copy()
-        w_p[0,i] += eps
-        w_m[0,i] -= eps
-        w_p = [weights[0],w_p]
-        w_m = [weights[0],w_m]
-        z_p, a_p = feed_through_all(configs,w_p,biases,latt_dim,
-                                                  n_plaqs,n_loops,n_blocks)
-        z_m, a_m = feed_through_all(configs,w_m,biases,latt_dim,
-                                                  n_plaqs,n_loops,n_blocks)
-        cost_p = cost(actions,a_p[1])
-        cost_m = cost(actions,a_m[1])
-        dw_out[0,i] = (cost_p-cost_m)/(2*eps)
+    for i in range(0,n_params):
+        for j in range(0,n_blocks):
+            w1_temp = np.zeros(weights[1].shape)
+            w1_temp[i,j] = fd_eps
+            w1_temp = chainRuleF(w1_temp,latt_dim,n_plaqs,n_blocks,n_loops)
+            w_p = weights[1] + w1_temp
+            w_m = weights[1] - w1_temp
+            w_p = [weights[0],w_p]
+            w_m = [weights[0],w_m]
+            z_p, a_p = feed_through_all(configs,w_p,biases,latt_dim,
+                                                      n_plaqs,n_loops,n_blocks)
+            z_m, a_m = feed_through_all(configs,w_m,biases,latt_dim,
+                                                      n_plaqs,n_loops,n_blocks)
+            cost_p = cost(actions,a_p[1])
+            cost_m = cost(actions,a_m[1])
+            dw_out[i,j] = (cost_p-cost_m)/(2*fd_eps)
     return dw_out
     
 def fd_b1(configs,actions,weights,biases):
-    eps = 0.001
-    b_p = biases[1] + eps
-    b_m = biases[1] - eps
+    b_p = biases[1] + fd_eps
+    b_m = biases[1] - fd_eps
     b_p = [biases[0],b_p]
     b_m = [biases[0],b_m]
     z_p, a_p = feed_through_all(configs,weights,b_p,latt_dim,
@@ -235,22 +244,75 @@ def fd_b1(configs,actions,weights,biases):
                                                   n_plaqs,n_loops,n_blocks)
     cost_p = cost(actions,a_p[1])
     cost_m = cost(actions,a_m[1])
-    db_out = (cost_p - cost_m)/(2*eps)
+    db_out = (cost_p - cost_m)/(2*fd_eps)
     return db_out
 
 def fd_grad(configs,actions,weights,biases):
     db0 = fd_b0(configs,actions,weights,biases)
+    #print('Finished b0 in '+str(time.time()-t_start)+' seconds.')
     db1 = fd_b1(configs,actions,weights,biases)
+    #print('Finished b1 in '+str(time.time()-t_start)+' seconds.')
     dw0 = fd_w0(configs,actions,weights,biases)
+    #print('Finished W0 in '+str(time.time()-t_start)+' seconds.')
     dw1 = fd_w1(configs,actions,weights,biases)
+#    print('Finished W1 in '+str(time.time()-t_start)+' seconds.')
     
     w_out = [dw0,dw1]
     b_out = [db0,db1]
     return w_out, b_out
 
+#Computes moment vectors for Adam
+def moment_vec(m_in,v_in,beta1,beta2,grad):
+    m_out = beta1*m_in+(1-beta1)*grad
+    v_out = beta2*v_in+(1-beta2)*grad**2
+    return m_out,v_out
+
+def bias_moment(m_in,v_in,beta1,beta2,t_step):
+    m_out = m_in/(1-beta1**t_step)
+    v_out = v_in/(1-beta2**t_step)
+    return m_out, v_out
+
+#Implements Adam optimizer
+def adam(params,t_step,db,dw):
+    if t_step == 0:
+        print('Make sure the t value is positive!\n')
+        return 'Nan'
+    #adam_params = (mb,mw,vb,vw,gamma,beta_1,beta_2,epsilon)
+    
+    mb0,vb0=moment_vec(params[0][0],params[2][0],params[5],params[6],db[0])
+    mb1,vb1=moment_vec(params[0][1],params[2][1],params[5],params[6],db[1])
+    
+    mw0,vw0=moment_vec(params[1][0],params[3][0],params[5],params[6],dw[0])
+    mw1,vw1=moment_vec(params[1][1],params[3][1],params[5],params[6],dw[1])
+    
+    mb = [mb0,mb1]
+    mw = [mw0,mw1]
+    vb = [vb0,vb1]
+    vw = [vw0,vw1]
+    
+    new_params = [mb,mw,vb,vw,params[4],params[5],params[6],params[7]]
+    
+    mb0,vb0 = bias_moment(mb0,vb0,params[5],params[6],t_step)
+    mb1,vb1 = bias_moment(mb1,vb1,params[5],params[6],t_step)
+    
+    mw0,vw0 = bias_moment(mw0,vw0,params[5],params[6],t_step)
+    mw1,vw1 = bias_moment(mw1,vw1,params[5],params[6],t_step)
+    
+    db0 = mb0/(vb0**0.5 + params[7])
+    db1 = mb1/(vb1**0.5 + params[7])
+    
+    db = [db0,db1]
+    
+    dw0 = mw0/(vw0**0.5 + params[7])
+    dw1 = mw1/(vw1**0.5 + params[7])
+    
+    dw = [dw0,dw1]    
+    return db, dw, new_params
+
+
 #Computes the gradient for all of the configs (FOR 2 LAYERS ONLY).
-def compute_grad(configs,actions,weights,biases,latt_dim,n_plaqs,n_loops,n_blocks,
-                 debug=False,verbose=False):
+def compute_grad(configs,actions,weights,biases,latt_dim,n_plaqs,n_loops,n_blocks,t_step,
+                 debug=False,verbose=False,optimizer='None',aParams=0):
     if debug == True:
         verbose = True
     n_layers_in = len(weights)
@@ -267,7 +329,7 @@ def compute_grad(configs,actions,weights,biases,latt_dim,n_plaqs,n_loops,n_block
     d0 = np.zeros(shape=z_init[0].shape)
     for i in range(0,len(configs)):
         dR = d_activ(z_init[0][i,:,:]).reshape((-1,1))
-        weightIn = np.transpose(weights[1] * d1[i])
+        weightIn = (weights[1] * d1[i]).reshape((-1,1))#deleted transpose
         d0_temp = np.multiply(weightIn,dR)
         d0[i,:,:] = d0_temp.reshape((-1,n_blocks))
         #Returns a \delta value for each parameter shaped to fit the block structure.
@@ -278,7 +340,6 @@ def compute_grad(configs,actions,weights,biases,latt_dim,n_plaqs,n_loops,n_block
     #to the 1st layer (0th is input; has nothing attached)- now, deltas[0] is the 
     #change applied to the weights at the 1st layer
     deltas = list(reversed(deltas))
-    
     n_params = configs.shape[1]
     n_configs = configs.shape[0]
     dW0 = np.zeros(shape=weights[0].shape)
@@ -291,33 +352,43 @@ def compute_grad(configs,actions,weights,biases,latt_dim,n_plaqs,n_loops,n_block
                 for k in range(0,n_blocks):
                     dW0[i,j,k] += deltas[0][t,i,k] * configs[t,j]/n_configs
         db0 += deltas[0][t]/n_configs
-        a_in = a_init[0][t].reshape((1,-1))
+        a_in = a_init[0][t].reshape((-1,n_blocks))
         dW1 += np.dot(deltas[1][t], a_in)/n_configs
         db1 += deltas[1][t]/n_configs
-    
     #Applies the chain rule to sum the gradient components for the individual weights
     dW0 = chain_rule(dW0,latt_dim,n_plaqs,n_blocks,n_loops)
+    dW1 = chainRuleF(dW1,latt_dim,n_plaqs,n_blocks,n_loops)
+    db0 = chainRuleF(db0,latt_dim,n_plaqs,n_blocks,n_loops)
     
     d_weights = [dW0,dW1]
     d_biases = [db0,db1]
     
+    if optimizer == 'Adam':
+        d_biases,d_weights,aParams = adam(aParams,t_step,d_biases,d_weights)
+        
     if debug == True:
-        return deltas, d_weights, d_biases, a_init, z_init
+        return deltas, d_weights, d_biases, a_init, z_init, aParams
     else:
-        return d_weights, d_biases
-    
-def epoch(configs,actions,weights,biases,latt_dim,n_plaqs,n_loops,n_blocks,
-          debug=False,mode='BP'):
+        return d_weights, d_biases, aParams
+
+#Mode: 'BP' is backpropagation, 'FD' is finite difference (which is currently wrong)
+def epoch(configs,actions,weights,biases,latt_dim,n_plaqs,n_loops,n_blocks,t_step,
+          debug=False,mode='BP',optimizer='None',aParams=0):
     if mode == 'FD':
         d_weights, d_biases = fd_grad(configs,actions,weights,biases)
     else:
         if debug == True:
-            deltas,d_weights,d_biases,a_init,z_init=compute_grad(configs,actions,weights,
-                                                                 biases,latt_dim,n_plaqs,
-                                                                 n_loops,n_blocks,debug)
+            deltas,d_weights,d_biases,\
+                    a_init,z_init, aParams=compute_grad(configs,actions,weights,
+                                                        biases,latt_dim,n_plaqs,
+                                                        n_loops,n_blocks,t_step,
+                                                        debug,optimizer=optimizer,
+                                                        aParams=aParams)
         else:
-            d_weights, d_biases = compute_grad(configs,actions,weights,biases,latt_dim,
-                                           n_plaqs,n_loops,n_blocks)
+            d_weights, d_biases, aParams\
+                        = compute_grad(configs,actions,weights,biases,latt_dim,
+                                      n_plaqs,n_loops,n_blocks,t_step,
+                                      optimizer=optimizer,aParams=aParams)
     new_weights = []
     new_biases = []
     for s in range(0,n_layers):
@@ -327,35 +398,64 @@ def epoch(configs,actions,weights,biases,latt_dim,n_plaqs,n_loops,n_blocks,
         new_biases.append(bias_temp)
         
     if debug == True:
-        return deltas, d_weights, d_biases, a_init, z_init, new_weights, new_biases
+        return deltas, d_weights, d_biases, a_init, z_init, new_weights, new_biases, aParams
     else:
-        return new_weights, new_biases
+        return new_weights, new_biases, aParams
     
-def train(weights,biases,n_epochs,n_keep,val_configs,val_actions,train_configs,train_actions,
-          write=False,debug=False,mode='BP'):
+def train(weights,biases,n_epochs,n_keep,val_configs,val_actions,train_configs,
+          train_actions,write=False,debug=False,mode='BP',batch_percent=0.1,
+          optimizer=None,aParams=None):
+    if optimizer== None:
+        print('No optimizer in use.')
+    else:
+        print('Using '+optimizer+' optimizer.')
     weights_in = weights.copy()
     biases_in = biases.copy()
     run_time = time.ctime()
     
     if write == True:
-        os.chdir('Data')
+        if 'Data' not in os.getcwd():
+            os.chdir('Data')
         write_dat = str(run_time)+".txt"
         open("std_vals "+write_dat,"w").close()
         open("b_vals "+write_dat,"w").close()
         open("W_vals "+write_dat,"w").close()
+        if 'Legend.txt' not in os.listdir():
+            key = open('Legend.txt','w')
+            key.write('Date, Lattice Size, N_blocks, N_dims, Adam?')
+            key.close()
+        key = open('Legend.txt','a')
+        key.write(write_dat+', '+str(latt_dim[0])+', '+str(n_blocks)
+            +', '+str(len(latt_dim)))
+        if optimizer == 'Adam':
+            key.write(', Y\n')
+        else:
+            key.write(', N\n')
+        key.close()
     
     std_vals = np.zeros(n_keep)
     w_all = []
     bias_all = []
     deltas = []
     m = 0
+    batch_size = int(train_configs.shape[0]*batch_percent)
     for n in range(0,n_epochs):
+        t_step = n + 1
+        perm = np.random.permutation(train_configs.shape[0])
+        batch_perm = perm[0:batch_size]
+        
+        batch_configs = train_configs[batch_perm,:]
+        batch_actions = train_actions[batch_perm]
+        
         if debug == False:
-            weights_out, biases_out = epoch(train_configs,train_actions,weights_in,biases_in,
-                                      latt_dim,n_plaqs,n_loops,n_blocks,mode)
-        else:
+            weights_out, biases_out, aParams\
+                        = epoch(batch_configs,batch_actions,weights_in,biases_in,
+                                      latt_dim,n_plaqs,n_loops,n_blocks,t_step,
+                                      mode=mode,optimizer=optimizer,aParams=aParams)
+        else: #Note: debugging uses full training set
             ep_out = epoch(train_configs,train_actions,weights_in,biases_in,
-                                      latt_dim,n_plaqs,n_loops,n_blocks,debug,mode)
+                                      latt_dim,n_plaqs,n_loops,n_blocks,t_step,
+                                      debug,mode,optimizer=optimizer,aParams=aParams)
             weights_out = ep_out[5]
             biases_out = ep_out[6]
             w_all.append(weights_out)
@@ -400,52 +500,130 @@ def train(weights,biases,n_epochs,n_keep,val_configs,val_actions,train_configs,t
     else:
         return std_vals, weights_in, biases_in
 
-plaqs = read_plaqs('4x4 Plaqs.txt')[0,:].reshape((1,-1))
-shift_plaqs = read_plaqs('4x4 Translated n_t Plaqs.txt')[0,:].reshape((1,-1))
+plaqs = read_plaqs('4x4 Plaqs.txt')#[0,:]#.reshape((1,-1))
+shift_plaqs = read_plaqs('4x4 Translated n_t Plaqs.txt')
 actions = read_acts('4x4 Actions.txt')
 #test_plaqs = plaqs[0:10,:]#.reshape((22,-1))
 
+config_perm = np.random.permutation(plaqs.shape[0])
+train_vals = config_perm[0:8000]
+val_vals = config_perm[8000:]
+
+train_actions = actions[train_vals]
+val_actions = actions[val_vals]
+
+train_configs = plaqs[train_vals]
+val_configs = plaqs[val_vals]
+shift_configs = shift_plaqs[train_vals]
+
 latt_dim = [4,4]
 n_plaqs = 12
-n_blocks = 1
+n_blocks = 100
 n_loops = [1,4]
+fd_eps = 1e-8
 
 n_params = np.sum(n_loops)+n_plaqs
 
 #Excluding input layer - check because code isn't arbitrary yet
 n_layers = 2
-learn_rate = 1e-2#Much higher of a learning rate makes training completely random
+learn_rate = 1
 
-#Imported from block_param_funcs - defines parameters for a block
-a, b1, W1 = param_init(latt_dim,n_plaqs,n_blocks,n_loops)#,var_type='Ones',mult=0.1)
-b2, W2 = fnn_param_init(latt_dim,n_blocks)
+n_epochs = 10
+n_keep = 5
 
-#Probably inefficient way, but chain_rule makes sure that W1 isn't populated
-# mostly by zeros.
-W1 = chain_rule(mask_mat(latt_dim,n_plaqs,n_blocks,n_loops,W1),latt_dim,n_plaqs,n_blocks,n_loops)
+def main():
+    #Imported from block_param_funcs - defines parameters for a block
+    a, b1, W1 = param_init(latt_dim,n_plaqs,n_blocks,n_loops)#,var_type='Ones',mult=0.1)
+    b2, W2 = fnn_param_init(latt_dim,n_blocks)
+    
+    #Probably inefficient way, but chain_rule makes sure that W1 isn't populated
+    # mostly by zeros.
+    W1 = chain_rule(mask_mat(latt_dim,n_plaqs,n_blocks,n_loops,W1),latt_dim,n_plaqs,n_blocks,n_loops)
+    
+    w = [W1,W2]
+    b = [b1,b2]
+    
+    # Constructs Adam parameters.
+    mb0 = np.zeros(b[0].shape)
+    mb1 = np.zeros(b[1].shape)
+    mw0 = np.zeros(w[0].shape)
+    mw1 = np.zeros(w[1].shape)
+    
+    mb = [mb0,mb1]
+    mw = [mw0,mw1]
+    
+    vb0 = np.zeros(b[0].shape)
+    vb1 = np.zeros(b[1].shape)
+    vw0 = np.zeros(w[0].shape)
+    vw1 = np.zeros(w[1].shape)
+    
+    vb = [vb0,vb1]
+    vw = [vw0,vw1]
+    
+    beta_1 = 0.9
+    beta_2 = 0.999
+    epsilon = 1e-8
+    
+    adam_params = [mb,mw,vb,vw,0,beta_1,beta_2,learn_rate,epsilon]
+    
+    std_vals, weights_in, biases_in = train(w,b,n_epochs,n_keep,val_configs,
+                                            val_actions,train_configs,
+                                            train_actions,write=True,
+                                            optimizer='Adam',aParams=adam_params)
+    
+#    plt.figure()
+#    plt.plot(std_vals,'.-')
+#    print(std_vals)
+    return std_vals
 
-w = [W1,W2]
-b = [b1,b2]
+def test_fd():
+    #Imported from block_param_funcs - defines parameters for a block
+    a, b1, W1 = param_init(latt_dim,n_plaqs,n_blocks,n_loops)#,var_type='Ones',mult=0.1)
+    b2, W2 = fnn_param_init(latt_dim,n_blocks)
+    
+    #Probably inefficient way, but chain_rule makes sure that W1 isn't populated
+    # mostly by zeros.
+    W1 = chain_rule(mask_mat(latt_dim,n_plaqs,n_blocks,n_loops,W1),latt_dim,n_plaqs,n_blocks,n_loops)
+    
+    w = [W1,W2]
+    b = [b1,b2]
+    
+    # Constructs Adam parameters.
+    mb0 = np.zeros(b[0].shape)
+    mb1 = np.zeros(b[1].shape)
+    mw0 = np.zeros(w[0].shape)
+    mw1 = np.zeros(w[1].shape)
+    
+    mb = [mb0,mb1]
+    mw = [mw0,mw1]
+    
+    vb0 = np.zeros(b[0].shape)
+    vb1 = np.zeros(b[1].shape)
+    vw0 = np.zeros(w[0].shape)
+    vw1 = np.zeros(w[1].shape)
+    
+    vb = [vb0,vb1]
+    vw = [vw0,vw1]
+    
+    beta_1 = 0.9
+    beta_2 = 0.999
+    epsilon = 1e-8
+    
+    adam_params = [mb,mw,vb,vw,0,beta_1,beta_2,learn_rate,epsilon]
+    
+    std_out,w_out,b_out= train(w,b,n_epochs,n_keep,val_configs,val_actions,
+                               train_configs,train_actions,write=True,
+                               mode='BP',optimizer='Adam',aParams=adam_params)
+    
+    plt.figure()
+    plt.imshow(w_out[0][:,:,0])
+    plt.colorbar()
+    return
 
-
-n_epochs = 5000
-n_keep = 200
-
-z, a = feed_through_all(plaqs,w,b,latt_dim,n_plaqs,n_loops,n_blocks)
-z_s, a_s = feed_through_all(shift_plaqs,w,b,latt_dim,n_plaqs,n_loops,n_blocks)
-
-
-#test=compute_grad(train_configs,train_actions,w,b,latt_dim,n_plaqs,
-#                  n_loops,n_blocks,debug=True)
-#std_out, weight_out, bias_out = train(w,b,n_epochs,n_keep,val_configs,
-#                                      val_actions,train_configs,train_actions,
-#                                      write=True,debug=False)
-#fd_test = fd_w1(train_configs,train_actions,w,b)
-#print('finite difference: \n'+str(w[1] - learn_rate * fd_test))
-#print('back propagation: \n'+str(weight_out[-1][1]))
-
-#plt.figure()
-#plt.plot(np.arange(n_keep),std_out)
+main()
+#for n_blocks in range(1,10):
+#    print('n_blocks = '+str(n_blocks))
+#    main()
 
 t_end = time.time()
 print('Took '+str(t_end-t_start)+' seconds.')
